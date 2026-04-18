@@ -30,9 +30,13 @@ const app = express();
 
 // ─── MIDDLEWARE ───────────────────────────────────────────
 app.use(cors({
-  origin: ["http://localhost:3000", "http://localhost:3001"],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  origin: [
+    "http://localhost:3000",
+    "https://rds-frontend-iweakmdr2-sujaychoukhande-06s-projects.vercel.app",
+    "https://rds-frontend-eosin.vercel.app"
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type"]
 }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -710,14 +714,22 @@ function extractRoomImageFromZip(zipBuffer) {
 
       // Skip images that are almost certainly logos/icons
       if (width > 0 && height > 0) {
-        // Very small in both dimensions AND small file size → logo/icon
-        if (width < 100 && height < 100 && fileSizeKB < 15) continue;
-        // Extremely wide banner (aspect > 3.5) → likely a logo strip
-        if (width / height > 3.5 || height / width > 3.5) continue;
-      } else {
-        // No dimensions; rely on file size
-        if (fileSizeKB < 15) continue;
-      }
+         const aspect = width / height;
+
+  // ❌ Reject small images (logos)
+         if (width < 200 && height < 200) continue;
+
+  // ❌ Reject banner logos
+         if (aspect > 2.5 || aspect < 0.4) continue;
+
+  // ❌ Reject small area
+         if (width * height < 80000) continue;
+
+  // ❌ Reject too tiny file size
+         if (fileSizeKB < 30) continue;
+      }  else {
+         if (fileSizeKB < 30) continue;
+}
 
       // Base score: file size (heavier = more detail)
       let score = fileSizeKB * 8;
@@ -731,13 +743,14 @@ function extractRoomImageFromZip(zipBuffer) {
       }
 
       // 🎯 Strong bonus for higher image numbers (logos are often image1, image2)
-      const match = entry.entryName.match(/image(\d+)\.\w+$/i);
-      if (match) {
-        const num = parseInt(match[1], 10);
-        if (num === 3) score += 100;   // huge boost for image3
-        else if (num > 3) score += 80;
-        else if (num === 2) score -= 20; // penalty for likely logo
-        else if (num === 1) score -= 40;
+      const imageMatch = entry.entryName.match(/image(\d+)/i);
+
+      if (imageMatch) {
+         const num = parseInt(imageMatch[1], 10);
+
+         if (num <= 2) score -= 200;
+         else if (num === 3) score += 100;
+         else score += 80;
       }
 
       candidates.push({ entry, width, height, fileSizeKB, score });

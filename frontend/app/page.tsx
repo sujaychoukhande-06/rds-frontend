@@ -1,195 +1,171 @@
 "use client";
-
-import { useState } from "react";
-import dynamic from "next/dynamic";
-
-const RdsForm = dynamic(() => import("../components/RdsForm"), { ssr: false });
-const RecordsPage = dynamic(() => import("../components/RecordsPage"), { ssr: false });
-import { rdsSchema } from "../schema";
+import { useState, useRef } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
-type View = "form" | "records" | "search" | "export";
+async function extractFromBackend(type, content) {
+  const res = await fetch(`${API}/extract`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type, content })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Extraction failed");
+  return data;
+}
 
-export default function Page() {
-  const [activeSection, setActiveSection] = useState(0);
-  const [sidebarJump,   setSidebarJump]   = useState<{idx:number,ts:number}|null>(null);
-  const [view,          setView]          = useState<View>("form");
+export default function UploadZone({ onExtracted }) {
+  const [status,   setStatus]   = useState("idle");
+  const [msg,      setMsg]      = useState("");
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef();
 
-  const progress = Math.round((activeSection / rdsSchema.length) * 100);
+  async function processFile(file) {
+    if (!file) return;
+    const isXLS  = file.type.includes("spreadsheet") || /\.xlsx?$/i.test(file.name);
+    const isDOCX = file.type.includes("wordprocessingml") || /\.docx?$/i.test(file.name);
+
+    if (!isXLS && !isDOCX) {
+      setStatus("error");
+      setMsg("Unsupported file. Please upload an Excel (.xlsx) or Word (.docx).");
+      return;
+    }
+
+    setStatus("loading"); setMsg("Reading file...");
+
+    try {
+      let type, content;
+
+      if (isXLS) {
+        setMsg("Parsing Excel...");
+        const XLSX = await import("xlsx");
+        content = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = e => {
+            try {
+              const wb = XLSX.read(e.target.result, { type: "binary" });
+              let text = "";
+              wb.SheetNames.forEach(n => {
+                text += "\n--- Sheet: " + n + " ---\n";
+                text += XLSX.utils.sheet_to_csv(wb.Sheets[n]);
+              });
+              res(text);
+            } catch (err) { rej(err); }
+          };
+          r.onerror = rej;
+          r.readAsBinaryString(file);
+        });
+        type = "excel";
+      } else {
+        setMsg("Reading Word document...");
+        content = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = e => res(e.target.result.split(",")[1]);
+          r.onerror = rej;
+          r.readAsDataURL(file);
+        });
+        type = "word";
+      }
+
+      setMsg("AI is mapping fields...");
+      const result = await extractFromBackend(type, content);
+      const fields = result.fields || result;
+      const image  = result.image || null;
+      const count  = Object.keys(fields).length;
+
+      if (count === 0) {
+        setStatus("error");
+        setMsg("No matching RDS fields found. Check that the file contains RDS data.");
+        return;
+      }
+
+      onExtracted(fields, image);
+      setStatus("done");
+      setMsg(count + " fields auto-filled from \"" + file.name + "\"" + (image ? " (image extracted)" : "") + ". Review and complete remaining fields.");
+    } catch (e) {
+      setStatus("error");
+      setMsg(e.message || "Something went wrong.");
+    }
+  }
+
+  function onDrop(e) { e.preventDefault(); setDragging(false); processFile(e.dataTransfer.files[0]); }
+
+  const S = {
+    idle:    { border:"#e2e8f0", bg:"#f8fafc", icon:"📂", iconBg:"#eff6ff" },
+    loading: { border:"#93c5fd", bg:"#eff6ff", icon:"⏳", iconBg:"#dbeafe" },
+    done:    { border:"#86efac", bg:"#f0fdf4", icon:"✅", iconBg:"#dcfce7" },
+    error:   { border:"#fca5a5", bg:"#fef2f2", icon:"❌", iconBg:"#fee2e2" },
+  }[status];
 
   return (
-    <div style={{ display:"flex", minHeight:"100vh" }}>
-
-      {/* ── SIDEBAR ──────────────────────────────────────── */}
-      <aside className="sidebar">
-        <div className="sidebar-logo-area">
-          <div className="sidebar-brand">
-            RDS System
-            <span>Medical College</span>
-          </div>
-          <div style={{ marginTop:14, display:"flex", alignItems:"center", gap:9 }}>
-            <div style={{ width:32, height:32, borderRadius:9,
-              background:"linear-gradient(135deg,rgba(37,99,235,0.35),rgba(37,99,235,0.2))",
-              display:"flex", alignItems:"center", justifyContent:"center",
-              fontSize:14, fontWeight:700, color:"#93c5fd",
-              border:"1px solid rgba(37,99,235,0.3)" }}>A</div>
-            <div>
-              <div style={{ fontSize:12,color:"rgba(255,255,255,0.75)",fontWeight:600 }}>Admin</div>
-              <div style={{ fontSize:10,color:"rgba(255,255,255,0.32)" }}>Super Administrator</div>
-            </div>
-          </div>
+    <div style={{ marginBottom: 22 }}>
+      <div
+        onClick={() => status !== "loading" && inputRef.current.click()}
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        style={{
+          border: "2px dashed " + (dragging ? "#2563eb" : S.border),
+          background: dragging ? "#eff6ff" : S.bg,
+          borderRadius: 14, padding: "20px",
+          display: "flex", alignItems: "center", gap: 16,
+          cursor: status === "loading" ? "wait" : "pointer",
+          transition: "all 0.2s",
+        }}
+      >
+        <div style={{ width:50, height:50, borderRadius:12, flexShrink:0, background:S.iconBg,
+          display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>
+          {S.icon}
         </div>
 
-        <nav className="sidebar-nav">
-          <div className="nav-group-label">Form Sections</div>
-
-          {rdsSchema.map((section, idx) => {
-            const isActive = view === "form" && idx === activeSection;
-            const isDone   = view === "form" && idx < activeSection;
-            return (
-              <div key={section.id}
-                className={`nav-item ${isActive ? "active" : ""} ${isDone ? "completed" : ""}`}
-                onClick={() => { setView("form"); setSidebarJump({idx, ts: Date.now()}); window.scrollTo({top:0,behavior:"smooth"}); }}
-              >
-                <div className="nav-icon">{section.icon}</div>
-                <span className="nav-label">{section.section}</span>
-                <div className="nav-status">
-                  {isDone ? (
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                      <path d="M2 5l2.5 2.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  ) : isActive ? (
-                    <div style={{ width:5, height:5, background:"#93c5fd", borderRadius:"50%" }} />
-                  ) : (
-                    <span style={{ fontSize:9 }}>{idx+1}</span>
-                  )}
-                </div>
+        <div style={{ flex: 1 }}>
+          {status === "idle" && (
+            <>
+              <div style={{ fontWeight:700, fontSize:14, color:"#0f172a" }}>Upload Room Data Sheet to Auto-Fill</div>
+              <div style={{ fontSize:12, color:"#64748b", marginTop:3 }}>
+                Drag &amp; drop or click — Excel or Word. AI extracts fields automatically.
               </div>
-            );
-          })}
-
-          <div className="nav-group-label" style={{ marginTop:10 }}>Records &amp; Export</div>
-
-          {([
-            { icon:"📋", label:"All Room Sheets",      id:"records" },
-            { icon:"🔍", label:"Search &amp; Filter",  id:"search"  },
-            { icon:"📊", label:"Export Excel (All)",   id:"excel"   },
-            { icon:"📄", label:"Export PDF (All)",     id:"pdf"     },
-          ] as { icon:string; label:string; id:string }[]).map(item => (
-            <div key={item.id}
-              className={`nav-item ${view === item.id ? "active" : ""}`}
-              onClick={() => {
-                if (item.id === "excel") {
-                  window.open(`${API}/export/excel`, "_blank");
-                } else if (item.id === "pdf") {
-                  window.open(`${API}/export/pdf`, "_blank");
-                } else {
-                  setView(item.id as View);
-                }
-              }}
-            >
-              <div className="nav-icon" dangerouslySetInnerHTML={{ __html: item.icon }} />
-              <span className="nav-label" dangerouslySetInnerHTML={{ __html: item.label }} />
+            </>
+          )}
+          {status === "loading" && (
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <div style={{ width:18, height:18, border:"2px solid rgba(37,99,235,0.2)", borderTopColor:"#2563eb", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
+              <div style={{ fontWeight:600, fontSize:13, color:"#2563eb" }}>{msg}</div>
             </div>
-          ))}
-        </nav>
-
-        <div className="sidebar-progress-area">
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <span style={{ fontSize:10, color:"rgba(255,255,255,0.38)", fontWeight:700, letterSpacing:1 }}>FORM COMPLETION</span>
-            <span style={{ fontSize:12, color:"#93c5fd", fontWeight:700 }}>{progress}%</span>
-          </div>
-          <div className="progress-bar-bg">
-            <div className="progress-bar-fill" style={{ width:`${progress}%` }} />
-          </div>
-          <div style={{ fontSize:10, color:"rgba(255,255,255,0.28)", marginTop:6 }}>
-            {activeSection} of {rdsSchema.length} sections reviewed
-          </div>
-        </div>
-      </aside>
-
-      {/* ── MAIN ──────────────────────────────────────────── */}
-      <div className="main-wrapper">
-
-        {/* TOPBAR */}
-        <header className="topbar">
-          <div className="topbar-left">
-            <h1>
-              {view === "form"    ? "Room Data Sheet Dashboard"
-              : view === "records" || view === "search" ? "All Room Records"
-              : "Room Data Sheet"}
-            </h1>
-            <p>
-              {view === "form"
-                ? "Complete all sections to generate a comprehensive RDS"
-                : "Browse, download and manage submitted room data sheets"}
-            </p>
-          </div>
-
-          <div className="topbar-actions">
-            {view === "form" && (
-              <>
-                <div style={{ display:"flex", alignItems:"center", gap:7, padding:"6px 12px",
-                  background:"#fff", border:"1.5px solid #e2e8f0", borderRadius:10 }}>
-                  <div className="draft-dot" />
-                  <span style={{ fontSize:12, color:"#64748b", fontWeight:500 }}>Draft</span>
-                </div>
-                <button className="btn btn-ghost btn-sm"
-                  onClick={() => window.open(`${API}/export/excel`, "_blank")}>
-                  📊 Export Excel
-                </button>
-                <button className="btn btn-ghost btn-sm"
-                  onClick={() => window.open(`${API}/export/pdf`, "_blank")}>
-                  📄 Export PDF
-                </button>
-              </>
-            )}
-            {(view === "records" || view === "search") && (
-              <button className="btn btn-primary btn-sm" onClick={() => setView("form")}>
-                + New RDS
+          )}
+          {status === "done" && (
+            <>
+              <div style={{ fontWeight:700, fontSize:13, color:"#15803d" }}>{msg}</div>
+              <button onClick={e => { e.stopPropagation(); setStatus("idle"); setMsg(""); }}
+                style={{ marginTop:5, fontSize:12, color:"#64748b", background:"none", border:"none", cursor:"pointer", padding:0, textDecoration:"underline" }}>
+                Upload a different file
               </button>
-            )}
+            </>
+          )}
+          {status === "error" && (
+            <>
+              <div style={{ fontWeight:700, fontSize:13, color:"#dc2626" }}>{msg}</div>
+              <button onClick={e => { e.stopPropagation(); setStatus("idle"); setMsg(""); }}
+                style={{ marginTop:5, fontSize:12, color:"#64748b", background:"none", border:"none", cursor:"pointer", padding:0, textDecoration:"underline" }}>
+                Try again
+              </button>
+            </>
+          )}
+        </div>
+
+        {status === "idle" && (
+          <div style={{ display:"flex", gap:5, flexShrink:0 }}>
+            {[["XLSX","#dcfce7","#15803d"],["DOCX","#dbeafe","#1d4ed8"]].map(([t,bg,c]) => (
+              <span key={t} style={{ background:bg, color:c, padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700 }}>{t}</span>
+            ))}
           </div>
-        </header>
-
-        {/* PAGE BODY */}
-        <main className="page-content">
-
-          {/* Stats strip — form view only */}
-          {view === "form" && (
-            <div className="stats-strip">
-              {[
-                { icon:"📋", label:"Total Sections",  value: rdsSchema.length,              color:"#eff6ff", ac:"#2563eb" },
-                { icon:"✅", label:"Completed",        value: activeSection,                 color:"#f0fdf4", ac:"#10b981" },
-                { icon:"⏳", label:"Remaining",        value: rdsSchema.length-activeSection, color:"#fefce8", ac:"#f59e0b" },
-                { icon:"📊", label:"Progress",         value: `${progress}%`,               color:"#fdf4ff", ac:"#7c3aed" },
-              ].map(stat => (
-                <div key={stat.label} className="stat-card">
-                  <div className="stat-icon" style={{ background:stat.color }}>{stat.icon}</div>
-                  <div className="stat-body">
-                    <strong style={{ color:stat.ac }}>{stat.value}</strong>
-                    <span>{stat.label}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* View Router */}
-          {view === "form" && (
-            <RdsForm
-              onSectionChange={(idx: number) => setActiveSection(idx)}
-              jumpToSection={sidebarJump}
-            />
-          )}
-
-          {(view === "records" || view === "search") && (
-            <RecordsPage onBack={() => setView("form")} />
-          )}
-
-        </main>
+        )}
       </div>
+
+      <input ref={inputRef} type="file" accept=".xlsx,.xls,.docx,.doc"
+        style={{ display:"none" }} onChange={e => processFile(e.target.files[0])} />
+
+      <style>{"@keyframes spin { to { transform: rotate(360deg); } }"}</style>
     </div>
   );
 }

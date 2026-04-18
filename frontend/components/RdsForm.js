@@ -148,7 +148,7 @@ export default function RdsForm({ onSectionChange, jumpToSection }) {
     try {
       // Include the room image in the submission data
       const payload = { ...data, roomImage };
-      await axios.post(`${API_BASE}/save`, payload);
+      await axios.post(`${API}/save`, payload);
       localStorage.removeItem(DRAFT_KEY);
       setCompletedSections(new Set(rdsSchema.map(s => s.id)));
       addToast("✓ Room Data Sheet submitted successfully!", "success");

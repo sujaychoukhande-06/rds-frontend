@@ -1,10 +1,10 @@
 "use client";
 import { useState, useRef } from "react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+const API = process.env.NEXT_PUBLIC_API_URL || "";
 
 async function extractFromBackend(type, content) {
-  const res = await fetch(`${API_BASE}/extract`, {
+  const res = await fetch(`${API}/extract`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type, content })
@@ -16,13 +16,15 @@ async function extractFromBackend(type, content) {
 
 // ─── COMPONENT ────────────────────────────────────────────
 export default function UploadZone({ onExtracted }) {
-  const [status,    setStatus]    = useState("idle");
-  const [msg,       setMsg]       = useState("");
-  const [dragging,  setDragging]  = useState(false);
+  const [status,   setStatus]   = useState("idle");
+  const [msg,      setMsg]      = useState("");
+  const [dragging, setDragging] = useState(false);
   const inputRef = useRef();
 
+  // FIX 1: declared as async so await works inside
   async function processFile(file) {
     if (!file) return;
+
     const isXLS  = file.type.includes("spreadsheet") || /\.xlsx?$/i.test(file.name);
     const isDOCX = file.type.includes("wordprocessingml") || /\.docx?$/i.test(file.name);
 
@@ -32,10 +34,11 @@ export default function UploadZone({ onExtracted }) {
       return;
     }
 
-    setStatus("loading"); setMsg("Reading file…");
+    setStatus("loading");
+    setMsg("Reading file…");
 
     try {
-      // Read file as base64 (for both Word and Excel)
+      // Read file as base64
       const base64Content = await new Promise((res, rej) => {
         const r = new FileReader();
         r.onload = e => res(e.target.result.split(",")[1]); // base64 part only
@@ -46,6 +49,7 @@ export default function UploadZone({ onExtracted }) {
       const type = isDOCX ? "word" : "excel";
 
       setMsg("AI is mapping fields…");
+      // FIX 2: use API (not API_BASE which was never defined)
       const result = await extractFromBackend(type, base64Content);
       const fields = result.fields;
       const image  = result.image || null;
@@ -67,7 +71,11 @@ export default function UploadZone({ onExtracted }) {
     }
   }
 
-  function onDrop(e) { e.preventDefault(); setDragging(false); processFile(e.dataTransfer.files[0]); }
+  function onDrop(e) {
+    e.preventDefault();
+    setDragging(false);
+    processFile(e.dataTransfer.files[0]);
+  }
 
   const S = {
     idle:    { border:"#e2e8f0", bg:"#f8fafc",  icon:"📂", iconBg:"#eff6ff" },
@@ -92,47 +100,54 @@ export default function UploadZone({ onExtracted }) {
           transition: "all 0.2s",
         }}
       >
-        <div style={{ width:50, height:50, borderRadius:12, flexShrink:0, background:S.iconBg,
-          display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>
+        <div style={{
+          width: 50, height: 50, borderRadius: 12, flexShrink: 0,
+          background: S.iconBg, display: "flex", alignItems: "center",
+          justifyContent: "center", fontSize: 22
+        }}>
           {S.icon}
         </div>
 
         <div style={{ flex: 1 }}>
           {status === "idle" && (
             <>
-              <div style={{ fontWeight:700, fontSize:14, color:"#0f172a" }}>Upload Room Data Sheet to Auto-Fill</div>
-              <div style={{ fontSize:12, color:"#64748b", marginTop:3 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>
+                Upload Room Data Sheet to Auto-Fill
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>
                 Drag &amp; drop or click — Excel or Word. AI extracts fields and images automatically.
               </div>
             </>
           )}
           {status === "loading" && (
-  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-    <div className="spinner" style={{
-      width: 20,
-      height: 20,
-      border: "2px solid rgba(37,99,235,0.2)",
-      borderTopColor: "#2563eb",
-      borderRadius: "50%",
-      animation: "spin 0.8s linear infinite"
-    }} />
-    <div style={{ fontWeight: 600, fontSize: 13, color: "#2563eb" }}>{msg}</div>
-  </div>
-)}
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div className="spinner" style={{
+                width: 20, height: 20,
+                border: "2px solid rgba(37,99,235,0.2)",
+                borderTopColor: "#2563eb", borderRadius: "50%",
+                animation: "spin 0.8s linear infinite"
+              }} />
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#2563eb" }}>{msg}</div>
+            </div>
+          )}
           {status === "done" && (
             <>
-              <div style={{ fontWeight:700, fontSize:13, color:"#15803d" }}>{msg}</div>
-              <button onClick={e => { e.stopPropagation(); setStatus("idle"); setMsg(""); }}
-                style={{ marginTop:5, fontSize:12, color:"#64748b", background:"none", border:"none", cursor:"pointer", padding:0, textDecoration:"underline" }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#15803d" }}>{msg}</div>
+              <button
+                onClick={e => { e.stopPropagation(); setStatus("idle"); setMsg(""); }}
+                style={{ marginTop: 5, fontSize: 12, color: "#64748b", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}
+              >
                 Upload a different file
               </button>
             </>
           )}
           {status === "error" && (
             <>
-              <div style={{ fontWeight:700, fontSize:13, color:"#dc2626" }}>{msg}</div>
-              <button onClick={e => { e.stopPropagation(); setStatus("idle"); setMsg(""); }}
-                style={{ marginTop:5, fontSize:12, color:"#64748b", background:"none", border:"none", cursor:"pointer", padding:0, textDecoration:"underline" }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: "#dc2626" }}>{msg}</div>
+              <button
+                onClick={e => { e.stopPropagation(); setStatus("idle"); setMsg(""); }}
+                style={{ marginTop: 5, fontSize: 12, color: "#64748b", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}
+              >
                 Try again
               </button>
             </>
@@ -140,16 +155,24 @@ export default function UploadZone({ onExtracted }) {
         </div>
 
         {status === "idle" && (
-          <div style={{ display:"flex", gap:5, flexShrink:0 }}>
-            {[["XLSX","#dcfce7","#15803d"],["DOCX","#dbeafe","#1d4ed8"]].map(([t,bg,c])=>(
-              <span key={t} style={{ background:bg, color:c, padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700 }}>{t}</span>
+          <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+            {[["XLSX","#dcfce7","#15803d"],["DOCX","#dbeafe","#1d4ed8"]].map(([t, bg, c]) => (
+              <span key={t} style={{
+                background: bg, color: c, padding: "3px 10px",
+                borderRadius: 20, fontSize: 11, fontWeight: 700
+              }}>{t}</span>
             ))}
           </div>
         )}
       </div>
 
-      <input ref={inputRef} type="file" accept=".xlsx,.xls,.docx,.doc"
-        style={{ display:"none" }} onChange={e => processFile(e.target.files[0])} />
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".xlsx,.xls,.docx,.doc"
+        style={{ display: "none" }}
+        onChange={e => processFile(e.target.files[0])}
+      />
     </div>
   );
 }
