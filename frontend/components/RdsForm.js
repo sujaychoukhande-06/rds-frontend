@@ -162,8 +162,7 @@ export default function RdsForm({ onSectionChange, jumpToSection }) {
   };
 
   const onSubmit = async (data) => {
-    // Safety guard — never submit unless on the actual last section
-    if (currentIdx !== rdsSchema.length - 1) return;
+    if (currentIdx !== rdsSchema.length - 1) return; // strict guard
     setIsSubmitting(true);
     try {
       const payload = { ...data, roomImage };
@@ -220,7 +219,7 @@ export default function RdsForm({ onSectionChange, jumpToSection }) {
       </div>
 
       {/* FORM */}
-      <form onSubmit={handleSubmit(onSubmit)}>
+      <form onSubmit={e => e.preventDefault()}>
         <SectionCard
           title={currentSection.section}
           icon={currentSection.icon}
@@ -294,7 +293,12 @@ export default function RdsForm({ onSectionChange, jumpToSection }) {
             {!isLastSection ? (
               <button type="button" className="btn btn-primary" onClick={handleNext}>Next Section →</button>
             ) : (
-              <button type="submit" className="btn btn-success" disabled={isSubmitting}>
+              <button
+                type="button"
+                className="btn btn-success"
+                disabled={isSubmitting}
+                onClick={() => handleSubmit(onSubmit)()}
+              >
                 {isSubmitting ? (
                   <><span className="spinner" style={{ width:14,height:14,border:"2px solid rgba(255,255,255,0.3)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin 0.6s linear infinite",display:"inline-block" }} /> Submitting…</>
                 ) : "✓ Submit RDS"}
