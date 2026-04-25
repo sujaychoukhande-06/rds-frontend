@@ -30,11 +30,15 @@ const app = express();
 
 // ─── MIDDLEWARE ───────────────────────────────────────────
 app.use(cors({
-  origin: [
-    "http://localhost:3000",
-    "https://rds-frontend-iweakmdr2-sujaychoukhande-06s-projects.vercel.app",
-    "https://rds-frontend-eosin.vercel.app"
-  ],
+  origin: (origin, callback) => {
+    // Allow: localhost, any *.vercel.app subdomain, Render itself
+    const allowed = !origin
+      || origin.startsWith("http://localhost")
+      || origin.endsWith(".vercel.app")
+      || origin.endsWith(".onrender.com");
+    if (allowed) callback(null, true);
+    else callback(new Error("Not allowed by CORS"));
+  },
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type"]
 }));
@@ -347,7 +351,7 @@ if (imagePath && fs.existsSync(imagePath)) {
       hLine(doc.y, BORDER, 0.5);
       doc.font("Helvetica").fontSize(7.5).fillColor(MUTED)
          .text(
-           `Generated: ${new Date().toLocaleString("en-IN")}   |   RDS ID: ${r.id}   |   Medical College Facility Planning`,
+           `Generated: ${new Date().toLocaleString("en-IN")}   |   RDS ID: ${r.id}   |   Medical Infra Facility Planning`,
            MARGIN, doc.y + 4, { width: CONTENT, align: "center" }
          );
     });
@@ -675,123 +679,128 @@ Rules:
 - Pay special attention to "roomFunction" which is typically at the top of the document
 - Return ONLY the JSON object, no markdown, no explanation`;
 
-// Helper to extract first image from a zip buffer (DOCX/XLSX)
-// Helper: extract the most suitable image (room layout) from a zip buffer (DOCX/XLSX)
-// Helper: extract the most suitable image (room layout) from a zip buffer (DOCX/XLSX)
-// Helper: extract the most suitable image (room layout) from a zip buffer (DOCX/XLSX)
+// Extract room layout image from DOCX/XLSX zip buffer.
+// Proven analysis of Adani RDS docs:
+//   image1.png = CPG logo (9KB, 174x128) — in first table row
+//   image2.png = Adani logo (50KB, 1200x731) — in first table row  ← was beating room image
+//   image3.png = room drawing — in second/third table row
+//
+// THREE-LAYER BLOCKING:
+//   Layer 1: word/_rels/header*.xml.rels + footer*.xml.rels
+//   Layer 2: images referenced in the FIRST <w:tr> of document.xml  ← KEY FIX
+//   Layer 3: size/aspect heuristics for any remaining logos
 function extractRoomImageFromZip(zipBuffer) {
   try {
-    const zip = new AdmZip(zipBuffer);
+    const zip     = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
 
-    // Find all image entries in standard media folders
+    // ── Layer 1: Word header/footer section images ───────────────────────
+    const blockedImages = new Set();
+    entries.forEach(e => {
+      if (/word\/_rels\/(header|footer)\d*\.xml\.rels$/i.test(e.entryName)) {
+        try {
+          const xml = e.getData().toString("utf8");
+          [...xml.matchAll(/Target="[^"]*media\/([^"]+)"/gi)]
+            .forEach(m => blockedImages.add(path.basename(m[1]).toLowerCase()));
+        } catch (_) {}
+      }
+    });
+
+    // ── Layer 2: First table row of document body (banner/logo row) ──────
+    const docRelsEntry = entries.find(e => e.entryName === "word/_rels/document.xml.rels");
+    const docXmlEntry  = entries.find(e => e.entryName === "word/document.xml");
+
+    if (docRelsEntry && docXmlEntry) {
+      try {
+        // Build rId → image filename map
+        // IMPORTANT: Target can be "media/img.png" OR "../media/img.png" — handle both
+        const relsXml   = docRelsEntry.getData().toString("utf8");
+        const rIdToFile = {};
+        [...relsXml.matchAll(/Id="([^"]+)"[^>]*Target="[^"]*media\/([^"]+)"/gi)]
+          .forEach(m => { rIdToFile[m[1]] = path.basename(m[2]).toLowerCase(); });
+
+        // Get every <w:tr>...</w:tr> block in document order
+        const docXml = docXmlEntry.getData().toString("utf8");
+        const allRows = [...docXml.matchAll(/<w:tr[ >][\s\S]*?<\/w:tr>/g)];
+
+        // Block images found in the FIRST table row (always the banner/logo row)
+        if (allRows.length > 0) {
+          const firstRow = allRows[0][0];
+          [...firstRow.matchAll(/r:embed="([^"]+)"/gi)]
+            .forEach(m => { if (rIdToFile[m[1]]) blockedImages.add(rIdToFile[m[1]]); });
+        }
+      } catch (_) {}
+    }
+
+    console.log(`[img] Blocked images: ${[...blockedImages].join(", ") || "none"}`);
+
+    // ── Collect all media images ──────────────────────────────────────────
     const imageEntries = entries.filter(e =>
       !e.isDirectory &&
       (e.entryName.includes("word/media/") || e.entryName.includes("xl/media/")) &&
-      /\.(png|jpe?g|gif|bmp|tiff?|webp)$/i.test(e.entryName)
+      /\.(png|jpe?g|gif|bmp|webp)$/i.test(e.entryName)
     );
-
     if (imageEntries.length === 0) return null;
 
+    // ── Score remaining (non-blocked) images ─────────────────────────────
     let bestImage = null;
-    let bestScore = -1;
-    const candidates = [];
+    let bestScore = -Infinity;
 
     for (const entry of imageEntries) {
-      const imgData = entry.getData();
+      const basename = path.basename(entry.entryName).toLowerCase();
+
+      if (blockedImages.has(basename)) {
+        console.log(`[img] SKIP blocked: ${basename}`);
+        continue;
+      }
+
+      const imgData    = entry.getData();
       const fileSizeKB = imgData.length / 1024;
-
       let width = 0, height = 0;
-      try {
-        const dimensions = sizeOf(imgData);
-        width = dimensions.width || 0;
-        height = dimensions.height || 0;
-      } catch (e) {
-        // if dimensions can't be read, skip or rely on file size only
-      }
+      try { const d = sizeOf(imgData); width = d.width || 0; height = d.height || 0; } catch (_) {}
 
-      const area = width * height;
-
-      // Skip images that are almost certainly logos/icons
+      // Layer 3: heuristic filters for any remaining logos
+      if (fileSizeKB < 3) { console.log(`[img] SKIP tiny file: ${basename}`); continue; }
       if (width > 0 && height > 0) {
-         const aspect = width / height;
-
-  // ❌ Reject small images (logos)
-         if (width < 200 && height < 200) continue;
-
-  // ❌ Reject banner logos
-         if (aspect > 2.5 || aspect < 0.4) continue;
-
-  // ❌ Reject small area
-         if (width * height < 80000) continue;
-
-  // ❌ Reject too tiny file size
-         if (fileSizeKB < 30) continue;
-      }  else {
-         if (fileSizeKB < 30) continue;
-}
-
-      // Base score: file size (heavier = more detail)
-      let score = fileSizeKB * 8;
-
-      // Bonus for larger area
-      if (area > 0) {
-        score += Math.sqrt(area) / 5;
-        // Bonus for near‑square aspect (room plans usually 0.7–1.5)
-        const aspect = width / height;
-        if (aspect >= 0.7 && aspect <= 1.5) score += 30;
+        if (width < 80 || height < 80)    { console.log(`[img] SKIP tiny px: ${basename}`); continue; }
+        if (width * height < 20000)        { console.log(`[img] SKIP small area: ${basename}`); continue; }
+        const asp = width / height;
+        if (asp > 5.0 || asp < 0.2)       { console.log(`[img] SKIP extreme aspect: ${basename}`); continue; }
       }
 
-      // 🎯 Strong bonus for higher image numbers (logos are often image1, image2)
-      const imageMatch = entry.entryName.match(/image(\d+)/i);
-
-      if (imageMatch) {
-         const num = parseInt(imageMatch[1], 10);
-
-         if (num <= 2) score -= 200;
-         else if (num === 3) score += 100;
-         else score += 80;
+      // Score: file size + pixel area + squarish bonus
+      let score = fileSizeKB * 10;
+      if (width > 0 && height > 0) {
+        score += Math.sqrt(width * height) / 4;
+        const asp = width / height;
+        if (asp >= 0.4 && asp <= 2.5) score += 60;
       }
 
-      candidates.push({ entry, width, height, fileSizeKB, score });
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestImage = { data: imgData, entryName: entry.entryName };
-      }
+      console.log(`[img] CANDIDATE: ${basename} ${width}x${height} ${fileSizeKB.toFixed(1)}KB score=${score.toFixed(0)}`);
+      if (score > bestScore) { bestScore = score; bestImage = { data: imgData, entryName: entry.entryName }; }
     }
 
-    // Log all candidates for debugging
-    console.log(`Found ${candidates.length} candidate images:`);
-    candidates.sort((a, b) => b.score - a.score).forEach(c => {
-      console.log(`  - ${c.entry.entryName}: ${c.width}x${c.height} px, ${c.fileSizeKB.toFixed(1)} KB, score=${c.score.toFixed(0)}`);
-    });
-
-    // Fallback: if nothing passed, pick largest file size
-    if (!bestImage && imageEntries.length > 0) {
-      console.log("No image passed filters, using largest file size as fallback");
-      let largest = { size: 0 };
+    // ── Fallback: any non-blocked image ──────────────────────────────────
+    if (!bestImage) {
+      console.log("[img] All filtered — picking largest non-blocked image");
       for (const entry of imageEntries) {
+        const basename = path.basename(entry.entryName).toLowerCase();
+        if (blockedImages.has(basename)) continue;
         const data = entry.getData();
-        if (data.length > largest.size) {
-          largest = { size: data.length, data, entryName: entry.entryName };
-        }
-      }
-      if (largest.data) {
-        bestImage = { data: largest.data, entryName: largest.entryName };
+        if (!bestImage || data.length > bestImage.data.length)
+          bestImage = { data, entryName: entry.entryName };
       }
     }
 
     if (bestImage) {
-      const ext = path.extname(bestImage.entryName).toLowerCase();
-      const mime = ext === ".png" ? "image/png" :
-                   ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" :
-                   ext === ".gif" ? "image/gif" : "image/png";
-      console.log(`✅ Selected room image: ${bestImage.entryName} (${(bestImage.data.length/1024).toFixed(1)} KB)`);
+      const ext  = path.extname(bestImage.entryName).toLowerCase();
+      const mime = (ext === ".jpg" || ext === ".jpeg") ? "image/jpeg"
+                 : ext === ".gif" ? "image/gif" : "image/png";
+      console.log(`[img] ✅ Selected: ${bestImage.entryName} (${(bestImage.data.length / 1024).toFixed(1)} KB)`);
       return `data:${mime};base64,${bestImage.data.toString("base64")}`;
     }
   } catch (e) {
-    console.warn("Image extraction error:", e.message);
+    console.warn("[img] Extraction error:", e.message);
   }
   return null;
 }
@@ -823,11 +832,39 @@ app.post("/extract", async (req, res) => {
     } else if (type === "word") {
       try {
         const buf = Buffer.from(content, "base64");
-        // Extract text with mammoth
-        const result = await mammoth.extractRawText({ buffer: buf });
-        textContent = result.value || "";
-        console.log(`Word extracted: ${textContent.length} chars`);
-        // Extract first image from docx (zip)
+
+        // Use convertToHtml to preserve table structure, then extract clean text
+        const htmlResult = await mammoth.convertToHtml({ buffer: buf });
+        const html = htmlResult.value || "";
+
+        // Convert HTML tables to readable key:value text
+        textContent = html
+          // Table rows → lines
+          .replace(/<tr[^>]*>/gi, "\n")
+          .replace(/<\/tr>/gi, "")
+          // Table cells → tab separated
+          .replace(/<td[^>]*>/gi, " | ")
+          .replace(/<\/td>/gi, "")
+          .replace(/<th[^>]*>/gi, " | ")
+          .replace(/<\/th>/gi, "")
+          // Headings
+          .replace(/<h[1-6][^>]*>/gi, "\n## ")
+          .replace(/<\/h[1-6]>/gi, "\n")
+          // Paragraphs and line breaks
+          .replace(/<p[^>]*>/gi, "\n")
+          .replace(/<\/p>/gi, "")
+          .replace(/<br\s*\/?>/gi, "\n")
+          // Strip remaining tags
+          .replace(/<[^>]+>/g, "")
+          // Decode HTML entities
+          .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+          .replace(/&nbsp;/g, " ").replace(/&#\d+;/g, " ")
+          // Clean up excessive whitespace but keep newlines
+          .replace(/[ \t]{2,}/g, " ")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+
+        console.log(`Word extracted (with tables): ${textContent.length} chars`);
         imageBase64 = extractRoomImageFromZip(buf);
         if (imageBase64) console.log("Word image extracted");
       } catch(e) {
@@ -863,10 +900,23 @@ app.post("/extract", async (req, res) => {
     }
 
     const completion = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile", max_tokens: 1500, temperature: 0,
+      model: "llama-3.3-70b-versatile", max_tokens: 4000, temperature: 0,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user",   content: `Extract all Room Data Sheet fields, especially "roomFunction" which is typically at the top:\n\n${textContent.slice(0, 12000)}` }
+        { role: "user",   content: `Extract all Room Data Sheet fields from this document. Important instructions:
+
+1. "roomFunction" field: Extract ALL bullet points from the room function/description section at the top. Join them with semicolons into one string. Do not truncate.
+
+2. "additionalFF" field: Extract ALL items from "Fittings and Furniture (FF)" table as: "ItemCode: Description x Quantity" joined with semicolons. Example: "FF 150: Air flowmeter x1; FF 1465: Bracket: suction bottle x1; Curtain Track System x1 set"
+
+3. "additionalFE" field: Extract ALL items from "Fixtures, Equipment and associated Services (FE)" table as: "ItemCode: Description x Quantity" joined with semicolons. Example: "FE 31700: Light: examination ceiling x1; FE 36050: Monitor: cardiac x1"
+
+4. For other fields, use 80-90% confidence inference — if the document says "PACU" infer roomTypology as "Other", criticalityLevel as "High", etc.
+
+5. Extract numeric values as numbers (netArea, patientCapacity, etc.)
+
+Document content:
+${textContent.slice(0, 28000)}` }
       ]
     });
 

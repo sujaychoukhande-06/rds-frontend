@@ -7,6 +7,7 @@ import { rdsSchema } from "../schema";
 import SectionCard from "./SectionCard";
 import FieldRenderer from "./FieldRenderer";
 import UploadZone from "./UploadZone";
+import SuccessOverlay from "./SuccessOverlay";
 
 const DRAFT_KEY = "rds_draft_v2";
 const API = process.env.NEXT_PUBLIC_API_URL || "";
@@ -75,6 +76,8 @@ export default function RdsForm({ onSectionChange, jumpToSection }) {
   const [isSubmitting,      setIsSubmitting]      = useState(false);
   const [lastSaved,         setLastSaved]         = useState(null);
   const [roomImage,         setRoomImage]         = useState(null);
+  const [showSuccess,       setShowSuccess]       = useState(false);
+  const [submittedRoom,     setSubmittedRoom]     = useState({ code: "", name: "" });
   const { toasts, addToast } = useToast();
 
   // Sync when sidebar clicks a section
@@ -113,7 +116,22 @@ export default function RdsForm({ onSectionChange, jumpToSection }) {
     return () => clearTimeout(timer);
   }, [formIsDirty]);
 
-  useEffect(() => { onSectionChange?.(currentIdx); }, [currentIdx, onSectionChange]);
+  const watchedValues = watch();
+
+  // Real-time: count sections with at least one filled field
+  const filledSectionsCount = rdsSchema.filter(section => {
+    const allNames = section.subsections
+      ? section.subsections.flatMap(s => s.fields.map(f => f.name))
+      : (section.fields || []).map(f => f.name);
+    return allNames.some(n => {
+      const v = watchedValues[n];
+      return v !== undefined && v !== null && v !== "" && !(typeof v === "number" && isNaN(v));
+    });
+  }).length;
+
+  useEffect(() => {
+    onSectionChange?.({ current: currentIdx, completed: filledSectionsCount });
+  }, [currentIdx, filledSectionsCount, onSectionChange]);
 
   const saveDraft = useCallback((auto = false) => {
     try {
@@ -146,12 +164,12 @@ export default function RdsForm({ onSectionChange, jumpToSection }) {
   const onSubmit = async (data) => {
     setIsSubmitting(true);
     try {
-      // Include the room image in the submission data
       const payload = { ...data, roomImage };
       await axios.post(`${API}/save`, payload);
       localStorage.removeItem(DRAFT_KEY);
       setCompletedSections(new Set(rdsSchema.map(s => s.id)));
-      addToast("✓ Room Data Sheet submitted successfully!", "success");
+      setSubmittedRoom({ code: data.roomCode || "", name: data.roomName || "" });
+      setShowSuccess(true);
     } catch (error) {
       console.error("Submit error:", error.response?.data || error.message);
       addToast("Submission failed — please try again", "error");
@@ -283,6 +301,20 @@ export default function RdsForm({ onSectionChange, jumpToSection }) {
           </div>
         </div>
       </form>
+
+      {showSuccess && (
+        <SuccessOverlay
+          roomCode={submittedRoom.code}
+          roomName={submittedRoom.name}
+          onClose={() => {
+            setShowSuccess(false);
+            setCurrentIdx(0);
+            reset({});
+            setCompletedSections(new Set());
+            setRoomImage(null);
+          }}
+        />
+      )}
 
       <div className="toast-container">
         {toasts.map(t => <div key={t.id} className={`toast ${t.type}`}><span>{t.msg}</span></div>)}

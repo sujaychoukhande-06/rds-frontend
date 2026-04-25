@@ -809,3 +809,105 @@ body {
   background-size: 200% 100%; animation: shimmer 1.8s infinite;
   border-radius: 12px;
 }
+/* ─── PREMIUM ENHANCEMENTS ──────────────────────────────── */
+
+/* Animated gradient border on active card */
+.rds-card {
+  --card-glow: 0 0 0 0 transparent;
+}
+.rds-card:focus-within {
+  box-shadow: var(--shadow-elevated), 0 0 0 2px rgba(59,130,246,0.15);
+}
+
+/* Section header accent line uses section color via CSS var */
+.rds-card::before {
+  background: linear-gradient(90deg,
+    var(--section-color, var(--accent-blue)) 0%,
+    var(--accent-cyan) 60%,
+    transparent 100%) !important;
+  opacity: 0.85;
+}
+
+/* Topbar breadcrumb trail */
+.topbar-left p {
+  display: flex; align-items: center; gap: 6px;
+}
+
+/* Nav item hover shimmer */
+.nav-item::after {
+  content: ''; position: absolute; inset: 0; border-radius: 12px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, transparent 100%);
+  opacity: 0; transition: opacity var(--transition); pointer-events: none;
+}
+.nav-item:hover::after { opacity: 1; }
+
+/* Stat card accent top border using color */
+.stat-card::before {
+  content: ''; position: absolute; top: 0; left: 20px; right: 20px; height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: linear-gradient(90deg, transparent, rgba(37,99,235,0.2), transparent);
+}
+
+/* Premium table header gradient */
+.records-table thead tr {
+  background: linear-gradient(180deg, #f8fafc 0%, #f0f5fc 100%);
+}
+
+/* Glowing active stepper dot */
+.stepper-dot.active {
+  animation: stepperPulse 2s ease-in-out infinite;
+}
+@keyframes stepperPulse {
+  0%,100% { box-shadow: 0 0 16px rgba(37,99,235,0.45); }
+  50%      { box-shadow: 0 0 28px rgba(37,99,235,0.7), 0 0 8px rgba(6,182,212,0.4); }
+}
+
+/* Toast icon dot */
+.toast.success::before { content: '✓'; margin-right: 2px; color: #34d399; font-weight: 800; }
+.toast.error::before   { content: '✕'; margin-right: 2px; color: #f87171; font-weight: 800; }
+
+/* Sidebar scroll custom */
+.sidebar-nav::-webkit-scrollbar { width: 3px; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+/* Field group hover highlight */
+.field-group {
+  padding: 12px; margin: -12px; border-radius: 14px;
+  transition: background var(--transition);
+}
+.field-group:focus-within {
+  background: rgba(59,130,246,0.025);
+}
+
+/* Premium step nav gradient border top */
+.step-nav {
+  background: linear-gradient(180deg, #fafcff 0%, #fff 100%);
+}
+
+/* Hamburger button hover */
+button:has(svg path[d*="M2 4"]):hover {
+  background: #f0f7ff !important;
+  border-color: #93c5fd !important;
+}
+
+/* Progress ring smooth */
+circle[stroke="#3b82f6"] {
+  transition: stroke-dasharray 0.6s cubic-bezier(0.23,1,0.32,1);
+}
+
+/* Online indicator pulse */
+div[title="System online"] {
+  animation: onlinePulse 3s ease-in-out infinite;
+}
+@keyframes onlinePulse {
+  0%,100% { box-shadow: 0 0 10px rgba(16,185,129,0.7); }
+  50%      { box-shadow: 0 0 18px rgba(16,185,129,1), 0 0 30px rgba(16,185,129,0.3); }
+}
+
+/* Smooth page transitions */
+.main-wrapper {
+  transition: margin-left 0.3s cubic-bezier(0.23,1,0.32,1);
+}
+
+/* Filter bar search icon tint on focus */
+.search-bar:focus-within svg path { stroke: #3b82f6; }
