@@ -162,6 +162,8 @@ export default function RdsForm({ onSectionChange, jumpToSection }) {
   };
 
   const onSubmit = async (data) => {
+    // Safety guard — never submit unless on the actual last section
+    if (currentIdx !== rdsSchema.length - 1) return;
     setIsSubmitting(true);
     try {
       const payload = { ...data, roomImage };
