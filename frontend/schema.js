@@ -71,7 +71,7 @@ export const rdsSchema = [
     fields: [
       { name: "roomFunction", label: "Room Function", type: "textarea", required: true, colSpan: 4 },
       { name: "keyActivities", label: "Key Activities", type: "textarea", required: true, colSpan: 4 },
-      { name: "userGroups", label: "User Groups", type: "textarea", required: true, colSpan: 2 },
+      { name: "userGroups", label: "User Groups", type: "usergroups", required: true, colSpan: 4 },
       { name: "operationalScenarios", label: "Operational Scenarios", type: "textarea", required: false, colSpan: 2 }
     ]
   },
