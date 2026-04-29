@@ -21,7 +21,7 @@ export default function LoginPage() {
   const cardRef    = useRef<HTMLDivElement>(null);
   const animRef    = useRef<number>(0);
 
-  const HEADLINES = ["Secure Access.", "Built for Scale.", "Enterprise Ready."];
+  const HEADLINES = ["Secure Access."];
   const fullText  = HEADLINES.join("  ·  ");
 
   // Typing animation
@@ -484,7 +484,7 @@ export default function LoginPage() {
           <div className="left">
             <div className="eyebrow">
               <div className="eyebrow-dot" />
-              <span className="eyebrow-text">Medical College RDS · v4.0</span>
+              <span className="eyebrow-text">Medical Infra RDS </span>
             </div>
 
             <h1 className="main-title">
@@ -502,7 +502,6 @@ export default function LoginPage() {
                 { bg:"rgba(37,99,235,0.15)", border:"rgba(37,99,235,0.3)", icon:"🏥", title:"Multi-Department RDS",     desc:"Centralized room data across all clinical departments" },
                 { bg:"rgba(6,182,212,0.12)",  border:"rgba(6,182,212,0.25)",  icon:"🤖", title:"AI-Powered Auto-Fill",    desc:"Extract fields instantly from Word & Excel documents" },
                 { bg:"rgba(16,185,129,0.12)", border:"rgba(16,185,129,0.25)", icon:"📊", title:"Excel & PDF Export",      desc:"One-click exports saved to cloud storage automatically" },
-                { bg:"rgba(124,58,237,0.15)", border:"rgba(124,58,237,0.3)",  icon:"🔐", title:"Role-Based Security",     desc:"Granular permissions with audit trail logging" },
               ].map(f => (
                 <div key={f.title} className="feat">
                   <div className="feat-icon" style={{ background: f.bg, border: `1px solid ${f.border}` }}>{f.icon}</div>
