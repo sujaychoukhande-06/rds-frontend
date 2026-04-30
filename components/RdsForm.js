@@ -190,7 +190,8 @@ export default function RdsForm({ onSectionChange, jumpToSection, editRecord, on
     if (currentIdx !== rdsSchema.length - 1) return;
     setIsSubmitting(true);
     try {
-      const payload = { ...data, roomImage };
+      const user = JSON.parse(sessionStorage.getItem("rds_user") || "{}");
+      const payload = { ...data, roomImage, _submittedBy: user.name || "system" };
       await axios.post(`${API}/save`, payload);
       localStorage.removeItem(DRAFT_KEY);
       setCompletedSections(new Set(rdsSchema.map(s => s.id)));
@@ -209,7 +210,8 @@ export default function RdsForm({ onSectionChange, jumpToSection, editRecord, on
     if (currentIdx !== rdsSchema.length - 1) return;
     setIsSubmitting(true);
     try {
-      await axios.put(`${API}/data/${editId}`, { ...data, roomImage });
+      const user = JSON.parse(sessionStorage.getItem("rds_user") || "{}");
+      await axios.put(`${API}/data/${editId}`, { ...data, roomImage, _editedBy: user.name || "system" });
       setSubmittedRoom({ code: data.roomCode || "", name: data.roomName || "" });
       addToast("Room updated successfully!", "success");
       setShowSuccess(true);
