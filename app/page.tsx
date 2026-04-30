@@ -8,11 +8,8 @@ import { rdsSchema } from "../schema";
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 type View = "form" | "records" | "search";
 
-interface RDSUser {
-  name: string;
-  role: string;
-  email: string;
-}
+interface RDSUser { name: string; role: string; email: string; }
+interface EditRecord { id: string; data: Record<string, any>; }
 
 function Page() {
   const router = useRouter();
@@ -23,21 +20,16 @@ function Page() {
   const [view,           setView]           = useState<View>("form");
   const [time,           setTime]           = useState("");
   const [sidebarOpen,    setSidebarOpen]    = useState(true);
+  const [editRecord,     setEditRecord]     = useState<EditRecord | null>(null);
 
   const progress = Math.round((completedCount / rdsSchema.length) * 100);
 
-  // ── Auth check on mount ───────────────────────────────
+  // ── Auth check ────────────────────────────────────────
   useEffect(() => {
     const raw = sessionStorage.getItem("rds_user");
-    if (!raw) {
-      router.replace("/login");
-      return;
-    }
-    try {
-      setCurrentUser(JSON.parse(raw));
-    } catch {
-      router.replace("/login");
-    }
+    if (!raw) { router.replace("/login"); return; }
+    try { setCurrentUser(JSON.parse(raw)); }
+    catch { router.replace("/login"); }
   }, [router]);
 
   // ── Live clock ────────────────────────────────────────
@@ -48,13 +40,18 @@ function Page() {
     return () => clearInterval(id);
   }, []);
 
-  // ── Logout ────────────────────────────────────────────
   const handleLogout = () => {
     sessionStorage.removeItem("rds_user");
     router.replace("/login");
   };
 
-  // ── Show nothing while auth check happens ─────────────
+  // ── Edit handler: called from RecordsPage ─────────────
+  const handleEdit = (record: EditRecord) => {
+    setEditRecord(record);   // pass data to RdsForm
+    setView("form");         // switch to form view
+    window.scrollTo({ top:0, behavior:"smooth" });
+  };
+
   if (!currentUser) return null;
 
   const avatarInitial = currentUser.name?.charAt(0)?.toUpperCase() || "U";
@@ -65,20 +62,15 @@ function Page() {
       {/* ── SIDEBAR ─────────────────────────────────── */}
       <aside className="sidebar" style={{ transform: sidebarOpen ? "none" : "translateX(-100%)", transition:"transform 0.3s cubic-bezier(0.23,1,0.32,1)" }}>
 
-        {/* Logo */}
         <div className="sidebar-logo-area">
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
             <div className="sidebar-brand">
               RDS System
               <span>Medical College</span>
             </div>
-            <div style={{
-              width:8, height:8, borderRadius:"50%", background:"#10b981",
-              boxShadow:"0 0 10px rgba(16,185,129,0.7)", flexShrink:0
-            }} title="System online" />
+            <div style={{ width:8, height:8, borderRadius:"50%", background:"#10b981", boxShadow:"0 0 10px rgba(16,185,129,0.7)", flexShrink:0 }} title="System online" />
           </div>
 
-          {/* User info */}
           <div style={{ marginTop:18, display:"flex", alignItems:"center", gap:10 }}>
             <div style={{
               width:36, height:36, borderRadius:11,
@@ -86,7 +78,7 @@ function Page() {
               display:"flex", alignItems:"center", justifyContent:"center",
               fontSize:15, fontWeight:800, color:"#93c5fd",
               border:"1px solid rgba(59,130,246,0.25)",
-              boxShadow:"0 4px 12px rgba(37,99,235,0.2)"
+              boxShadow:"0 4px 12px rgba(37,99,235,0.2)",
             }}>{avatarInitial}</div>
             <div style={{ flex:1, minWidth:0 }}>
               <div style={{ fontSize:12.5, color:"rgba(255,255,255,0.82)", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
@@ -96,22 +88,16 @@ function Page() {
                 {currentUser.role} · {time}
               </div>
             </div>
-            {/* Logout button */}
             <button
               onClick={handleLogout}
               title="Logout"
-              style={{
-                background:"none", border:"none", cursor:"pointer",
-                color:"rgba(255,255,255,0.3)", fontSize:14, padding:4,
-                flexShrink:0, transition:"color 0.2s"
-              }}
+              style={{ background:"none", border:"none", cursor:"pointer", color:"rgba(255,255,255,0.3)", fontSize:14, padding:4, flexShrink:0, transition:"color 0.2s" }}
               onMouseOver={e => (e.currentTarget.style.color = "rgba(255,255,255,0.7)")}
               onMouseOut={e  => (e.currentTarget.style.color = "rgba(255,255,255,0.3)")}
             >⏻</button>
           </div>
         </div>
 
-        {/* Nav */}
         <nav className="sidebar-nav">
           <div className="nav-group-label">Form Sections</div>
 
@@ -162,7 +148,6 @@ function Page() {
           ))}
         </nav>
 
-        {/* Progress */}
         <div className="sidebar-progress-area">
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
             <span style={{ fontSize:9.5, color:"rgba(255,255,255,0.3)", fontWeight:700, letterSpacing:1.5, textTransform:"uppercase", fontFamily:"'Sora',sans-serif" }}>
@@ -184,7 +169,6 @@ function Page() {
       {/* ── MAIN ─────────────────────────────────────── */}
       <div className="main-wrapper">
 
-        {/* TOPBAR */}
         <header className="topbar">
           <div style={{ display:"flex", alignItems:"center", gap:14 }}>
             <button
@@ -197,18 +181,22 @@ function Page() {
             </button>
             <div className="topbar-left">
               <h1>
-                {view === "form" ? "Room Data Sheet Dashboard" : "All Room Records"}
+                {view === "form"
+                  ? (editRecord ? "Edit Room Data Sheet" : "Room Data Sheet Dashboard")
+                  : "All Room Records"}
               </h1>
               <p>
                 {view === "form"
-                  ? `Section ${activeSection + 1} of ${rdsSchema.length} — ${rdsSchema[activeSection]?.section}`
+                  ? editRecord
+                    ? `Editing: ${editRecord.data?.roomCode || ""} — ${editRecord.data?.roomName || ""}`
+                    : `Section ${activeSection + 1} of ${rdsSchema.length} — ${rdsSchema[activeSection]?.section}`
                   : "Browse, download and manage submitted room data sheets"}
               </p>
             </div>
           </div>
 
           <div className="topbar-actions">
-            {view === "form" && (
+            {view === "form" && !editRecord && (
               <>
                 <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 14px", background:"#fff", border:"1.5px solid #e0e7ef", borderRadius:12 }}>
                   <svg width="18" height="18" viewBox="0 0 36 36" style={{ transform:"rotate(-90deg)" }}>
@@ -222,32 +210,32 @@ function Page() {
                   <div className="draft-dot" />
                   <span style={{ fontSize:12, color:"#64748b", fontWeight:500 }}>Draft</span>
                 </div>
-                <button className="btn btn-ghost btn-sm" onClick={() => window.open(`${API}/export/excel`, "_blank")}>
-                  📊 Excel
-                </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => window.open(`${API}/export/pdf`, "_blank")}>
-                  📄 PDF
-                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => window.open(`${API}/export/excel`, "_blank")}>📊 Excel</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => window.open(`${API}/export/pdf`, "_blank")}>📄 PDF</button>
               </>
             )}
+            {view === "form" && editRecord && (
+              <button className="btn btn-ghost btn-sm" onClick={() => { setEditRecord(null); setView("records"); }}>
+                ← Back to Records
+              </button>
+            )}
             {(view === "records" || view === "search") && (
-              <button className="btn btn-primary btn-sm" onClick={() => setView("form")}>
+              <button className="btn btn-primary btn-sm" onClick={() => { setEditRecord(null); setView("form"); }}>
                 + New RDS
               </button>
             )}
           </div>
         </header>
 
-        {/* PAGE BODY */}
         <main className="page-content">
 
-          {view === "form" && (
+          {view === "form" && !editRecord && (
             <div className="stats-strip">
               {[
-                { icon:"📋", label:"Total Sections",   value: rdsSchema.length,                color:"#eff6ff", ac:"#2563eb" },
-                { icon:"✅", label:"Completed",         value: completedCount,                   color:"#f0fdf4", ac:"#10b981" },
-                { icon:"⏳", label:"Remaining",         value: rdsSchema.length - completedCount, color:"#fefce8", ac:"#f59e0b" },
-                { icon:"📊", label:"Progress",          value: `${progress}%`,                  color:"#fdf4ff", ac:"#7c3aed" },
+                { icon:"📋", label:"Total Sections",    value: rdsSchema.length,                color:"#eff6ff", ac:"#2563eb" },
+                { icon:"✅", label:"Completed",          value: completedCount,                   color:"#f0fdf4", ac:"#10b981" },
+                { icon:"⏳", label:"Remaining",          value: rdsSchema.length - completedCount, color:"#fefce8", ac:"#f59e0b" },
+                { icon:"📊", label:"Progress",           value: `${progress}%`,                  color:"#fdf4ff", ac:"#7c3aed" },
               ].map(stat => (
                 <div key={stat.label} className="stat-card">
                   <div className="stat-icon" style={{ background:stat.color }}>{stat.icon}</div>
@@ -267,11 +255,19 @@ function Page() {
                 setCompletedCount(val.completed);
               }}
               jumpToSection={sidebarJump}
+              editRecord={editRecord}
+              onEditDone={() => {
+                setEditRecord(null);
+                setView("records");
+              }}
             />
           )}
 
           {(view === "records" || view === "search") && (
-            <RecordsPage onBack={() => setView("form")} />
+            <RecordsPage
+              onBack={() => { setEditRecord(null); setView("form"); }}
+              onEdit={handleEdit}
+            />
           )}
 
         </main>
